@@ -8,6 +8,7 @@ import pandas as pd
 
 
 def load_grid_results(out_root: str) -> pd.DataFrame:
+    out_root = os.path.expanduser(out_root)
     path = os.path.join(out_root, "grid_results.csv")
     if not os.path.exists(path):
         raise FileNotFoundError(path)

@@ -4,7 +4,7 @@ This repository packages the TG-SMN experimental code as importable Python modul
 
 The intended workflow is:
 
-1. Use the notebook in `notebooks/` as the top-level interface.
+1. Use the **root notebook** `TG_SMN_Run.ipynb` as the top-level interface.
 2. The notebook calls library functions to:
    - build environments (WikiText-2 permuted-vocab; multi-domain continual LM)
    - run baselines and TG-SMN variants
@@ -20,7 +20,11 @@ The intended workflow is:
 !pip -q install -e .
 ```
 
-3. Open `notebooks/TG_SMN_Run.ipynb` and run it top-to-bottom.
+3. Open `TG_SMN_Run.ipynb` (repo root) and run it top-to-bottom.
+
+Notes:
+- If you open the notebook from Google Drive or GitHub, Colab's working directory is often `/content`.
+  The first cell in the notebook will search for the repo root and `cd` into it automatically.
 
 ## Notes on Hugging Face `datasets>=4.0`
 

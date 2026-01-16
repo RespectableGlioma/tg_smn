@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pandas as pd
+import torch
 
 from .config import (
     DataCfg,
@@ -60,6 +63,10 @@ def run_grid(
     device = get_device(device)
     out_root = ensure_dir(out_root)
 
+    # Cache built environments under the sweep root so long sweeps are resumable
+    # across runtime resets.
+    env_cache_dir = ensure_dir(os.path.join(out_root, "_env_cache"))
+
     data_cfg = data_cfg or DataCfg()
     model_cfg = model_cfg or ModelCfgLM()
     train_cfg = train_cfg or TrainCfgLM()
@@ -68,7 +75,17 @@ def run_grid(
     rows: List[Dict[str, Any]] = []
 
     for env_cfg in env_cfgs:
-        env = build_env(env_cfg)
+        # Environment build can be expensive (tokenization, dataset loads).
+        # Cache by env_cfg signature so restarts don't redo it.
+        cfg_dict = asdict(env_cfg)
+        cfg_sig = hashlib.sha256(json.dumps(cfg_dict, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+        cache_path = os.path.join(env_cache_dir, f"{env_cfg.name}_{cfg_sig}.pt")
+
+        if os.path.exists(cache_path):
+            env = torch.load(cache_path)
+        else:
+            env = build_env(env_cfg)
+            torch.save(env, cache_path)
 
         for E in experts_list:
             # Update model cfg for this run

@@ -22,6 +22,12 @@ def count_params(model: torch.nn.Module) -> int:
 
 
 def ensure_dir(path: str) -> str:
+    """Create (if needed) and return a normalized directory path.
+
+    - Expands `~` for Colab/local friendliness.
+    - Leaves absolute paths (e.g. `/content/drive/...`) untouched.
+    """
+    path = os.path.expanduser(path)
     os.makedirs(path, exist_ok=True)
     return path
 
