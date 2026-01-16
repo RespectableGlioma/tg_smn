@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 import os
 import random
+import shutil
+import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
@@ -79,6 +81,33 @@ def loss_stochastic_std_lm(model: TransformerLM, xb: torch.Tensor, yb: torch.Ten
         losses.append(lm_loss(logits, yb).detach())
     losses = torch.stack(losses)
     return float(losses.std().item())
+
+
+def robust_save_ckpt(obj: Any, path: str) -> None:
+    """Saves a checkpoint, falling back to a temp file copy if direct save fails.
+
+    This works around 'PytorchStreamWriter failed' errors common when saving
+    directly to FUSE-mounted filesystems (like Google Drive in Colab).
+    """
+    try:
+        torch.save(obj, path)
+    except (RuntimeError, OSError) as e:
+        print(f"Direct save to {path} failed: {e}. Retrying via local temp file...")
+        # Save to a local temp file first (guaranteed to be on local disk)
+        fd, tmp_path = tempfile.mkstemp(suffix=".pt")
+        os.close(fd)
+        
+        try:
+            torch.save(obj, tmp_path)
+            # Atomic-ish move/copy to final destination
+            shutil.move(tmp_path, path)
+            print(f"Successfully saved to {path} via temp file.")
+        except Exception as e2:
+            print(f"Failed to save {path} even with temp fallback: {e2}")
+            # Clean up temp file if it still exists
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise e2
 
 
 def _summary_from_eval(eval_rows: List[Dict[str, Any]], n_tasks: int) -> Dict[str, float]:
@@ -383,7 +412,7 @@ def run_lm_experiment(
             eval_rows.append({"task_trained": task_id, "task_eval": j, "ppl": ppl})
 
         # checkpoint
-        torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "task": task_id}, os.path.join(exp_dir, f"ckpt_task{task_id}.pt"))
+        robust_save_ckpt({"model": model.state_dict(), "opt": opt.state_dict(), "task": task_id}, os.path.join(exp_dir, f"ckpt_task{task_id}.pt"))
 
     # Final test evaluation (mean over tasks)
     final_test_ppls = [eval_ppl(model, test_loaders[t]) for t in range(n_tasks)]
