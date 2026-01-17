@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pandas as pd
 import torch
+from tqdm.auto import tqdm
 
 from .config import (
     DataCfg,
@@ -51,6 +53,7 @@ def run_grid(
     learned_ablations: Optional[Sequence[LearnedAblation]] = None,
     device: Optional[str] = None,
     skip_existing: bool = True,
+    show_inner_progress: bool = False,
 ) -> pd.DataFrame:
     """Run a grid of experiments and write `grid_results.csv` under out_root.
 
@@ -73,6 +76,47 @@ def run_grid(
     fixed_ctrl_cfg = fixed_ctrl_cfg or FixedCtrlCfg()
 
     rows: List[Dict[str, Any]] = []
+
+    # Write incremental JSONL so long sweeps don't lose progress if the runtime resets.
+    jsonl_path = os.path.join(out_root, "grid_results.jsonl")
+
+    # Human-readable progress snapshot for monitoring from Drive.
+    progress_path = os.path.join(out_root, "grid_progress.json")
+
+    # Progress bar without ETA (time-to-completion estimates are intentionally omitted).
+    bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}] {rate_fmt}"
+
+    # Count total combinations (including those that may be skipped).
+    per_variant = 0
+    for v in variants:
+        if v == "tg_smn_learned" and learned_ablations:
+            per_variant += len(learned_ablations)
+        else:
+            per_variant += 1
+    total_runs = len(env_cfgs) * len(experts_list) * len(seeds) * per_variant
+
+    started_at = time.time()
+    done = 0
+    skipped = 0
+    failed = 0
+
+    def write_progress(current: Optional[Dict[str, Any]] = None) -> None:
+        snap = {
+            "total": int(total_runs),
+            "done": int(done),
+            "skipped": int(skipped),
+            "failed": int(failed),
+            "elapsed_sec": float(time.time() - started_at),
+            "current": current,
+        }
+        # Atomic-ish write
+        tmp = progress_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(snap, f, indent=2)
+        os.replace(tmp, progress_path)
+
+    pbar = tqdm(total=total_runs, desc="TG-SMN sweep", bar_format=bar_format)
+    write_progress(current=None)
 
     for env_cfg in env_cfgs:
         # Environment build can be expensive (tokenization, dataset loads).
@@ -109,49 +153,117 @@ def run_grid(
                                 f"seed{seed}",
                             )
                             summary_path = os.path.join(out_root, exp_name, "summary.json")
+                            current = {"env": env.name, "variant": variant, "ablation": abl.name, "n_experts": int(E), "seed": int(seed)}
+                            pbar.set_postfix(current)
+                            write_progress(current=current)
+
                             if skip_existing and _summary_exists(summary_path):
                                 s = load_json(summary_path)
-                                rows.append({"env": env.name, "variant": variant, "ablation": abl.name, "n_experts": E, "seed": seed, **s})
+                                row = {"env": env.name, "variant": variant, "ablation": abl.name, "n_experts": E, "seed": seed, "status": "skipped", **s}
+                                rows.append(row)
+                                with open(jsonl_path, "a", encoding="utf-8") as f:
+                                    f.write(json.dumps(row) + "\n")
+                                skipped += 1
+                                done += 1
+                                pbar.update(1)
                                 continue
 
+                            # Disable noisy inner progress bars during sweeps by default.
+                            tc_run = replace(tc, show_progress=bool(show_inner_progress))
+                            try:
+                                s = run_lm_experiment(
+                                    exp_name=exp_name,
+                                    variant=variant,
+                                    env=env,
+                                    data_cfg=data_cfg,
+                                    model_cfg=mc,
+                                    train_cfg=tc_run,
+                                    out_dir=out_root,
+                                    device=device,
+                                    fixed_ctrl_cfg=fixed_ctrl_cfg,
+                                    learned_ctrl_cfg=learned_ctrl_cfg,
+                                    learned_fixed_k=abl.fixed_k,
+                                    learned_fixed_replay=abl.fixed_replay,
+                                    learned_drop_obs_kl=abl.drop_obs_kl,
+                                    learned_drop_reward_kl=abl.drop_reward_kl,
+                                )
+                                row = {"env": env.name, "variant": variant, "ablation": abl.name, "n_experts": E, "seed": seed, "status": "ok", **s}
+                            except Exception as e:
+                                failed += 1
+                                row = {
+                                    "env": env.name,
+                                    "variant": variant,
+                                    "ablation": abl.name,
+                                    "n_experts": E,
+                                    "seed": seed,
+                                    "status": "error",
+                                    "error_type": type(e).__name__,
+                                    "error_message": str(e),
+                                    "exp_name": exp_name,
+                                }
+                                pbar.write(f"[ERROR] {current} -> {type(e).__name__}: {e}")
+                            rows.append(row)
+                            with open(jsonl_path, "a", encoding="utf-8") as f:
+                                f.write(json.dumps(row) + "\n")
+                            done += 1
+                            pbar.update(1)
+                            write_progress(current=None)
+                    else:
+                        exp_name = os.path.join(env.name, variant, "none", f"experts{E}", f"seed{seed}")
+                        summary_path = os.path.join(out_root, exp_name, "summary.json")
+                        current = {"env": env.name, "variant": variant, "ablation": "none", "n_experts": int(E), "seed": int(seed)}
+                        pbar.set_postfix(current)
+                        write_progress(current=current)
+
+                        if skip_existing and _summary_exists(summary_path):
+                            s = load_json(summary_path)
+                            row = {"env": env.name, "variant": variant, "ablation": "none", "n_experts": E, "seed": seed, "status": "skipped", **s}
+                            rows.append(row)
+                            with open(jsonl_path, "a", encoding="utf-8") as f:
+                                f.write(json.dumps(row) + "\n")
+                            skipped += 1
+                            done += 1
+                            pbar.update(1)
+                            continue
+
+                        tc_run = replace(tc, show_progress=bool(show_inner_progress))
+                        try:
                             s = run_lm_experiment(
                                 exp_name=exp_name,
                                 variant=variant,
                                 env=env,
                                 data_cfg=data_cfg,
                                 model_cfg=mc,
-                                train_cfg=tc,
+                                train_cfg=tc_run,
                                 out_dir=out_root,
                                 device=device,
                                 fixed_ctrl_cfg=fixed_ctrl_cfg,
                                 learned_ctrl_cfg=learned_ctrl_cfg,
-                                learned_fixed_k=abl.fixed_k,
-                                learned_fixed_replay=abl.fixed_replay,
-                                learned_drop_obs_kl=abl.drop_obs_kl,
-                                learned_drop_reward_kl=abl.drop_reward_kl,
                             )
-                            rows.append({"env": env.name, "variant": variant, "ablation": abl.name, "n_experts": E, "seed": seed, **s})
-                    else:
-                        exp_name = os.path.join(env.name, variant, "none", f"experts{E}", f"seed{seed}")
-                        summary_path = os.path.join(out_root, exp_name, "summary.json")
-                        if skip_existing and _summary_exists(summary_path):
-                            s = load_json(summary_path)
-                            rows.append({"env": env.name, "variant": variant, "ablation": "none", "n_experts": E, "seed": seed, **s})
-                            continue
+                            row = {"env": env.name, "variant": variant, "ablation": "none", "n_experts": E, "seed": seed, "status": "ok", **s}
+                        except Exception as e:
+                            failed += 1
+                            row = {
+                                "env": env.name,
+                                "variant": variant,
+                                "ablation": "none",
+                                "n_experts": E,
+                                "seed": seed,
+                                "status": "error",
+                                "error_type": type(e).__name__,
+                                "error_message": str(e),
+                                "exp_name": exp_name,
+                            }
+                            pbar.write(f"[ERROR] {current} -> {type(e).__name__}: {e}")
+                        rows.append(row)
+                        with open(jsonl_path, "a", encoding="utf-8") as f:
+                            f.write(json.dumps(row) + "\n")
+                        done += 1
+                        pbar.update(1)
+                        write_progress(current=None)
 
-                        s = run_lm_experiment(
-                            exp_name=exp_name,
-                            variant=variant,
-                            env=env,
-                            data_cfg=data_cfg,
-                            model_cfg=mc,
-                            train_cfg=tc,
-                            out_dir=out_root,
-                            device=device,
-                            fixed_ctrl_cfg=fixed_ctrl_cfg,
-                            learned_ctrl_cfg=learned_ctrl_cfg,
-                        )
-                        rows.append({"env": env.name, "variant": variant, "ablation": "none", "n_experts": E, "seed": seed, **s})
+    pbar.close()
+    write_progress(current=None)
 
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(out_root, "grid_results.csv"), index=False)

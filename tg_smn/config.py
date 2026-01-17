@@ -33,6 +33,13 @@ class TrainCfgLM:
     # If set, caps training steps per task for speed.
     max_steps_per_task: Optional[int] = None
 
+    # Progress / logging
+    # NOTE: We deliberately avoid printing time-to-completion estimates. Progress is shown
+    # via counts + elapsed time only.
+    show_progress: bool = True
+    progress_steps: bool = False
+    progress_postfix_every: int = 50
+
 
 # ============
 # Model config

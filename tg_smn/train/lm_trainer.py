@@ -3,8 +3,6 @@ from __future__ import annotations
 import math
 import os
 import random
-import shutil
-import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
@@ -14,6 +12,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm.auto import tqdm
 
 from ..config import DataCfg, FixedCtrlCfg, LearnedCtrlCfgLM, ModelCfgLM, TrainCfgLM
 from ..utils import count_params, ensure_dir, save_json, set_seed
@@ -81,33 +80,6 @@ def loss_stochastic_std_lm(model: TransformerLM, xb: torch.Tensor, yb: torch.Ten
         losses.append(lm_loss(logits, yb).detach())
     losses = torch.stack(losses)
     return float(losses.std().item())
-
-
-def robust_save_ckpt(obj: Any, path: str) -> None:
-    """Saves a checkpoint, falling back to a temp file copy if direct save fails.
-
-    This works around 'PytorchStreamWriter failed' errors common when saving
-    directly to FUSE-mounted filesystems (like Google Drive in Colab).
-    """
-    try:
-        torch.save(obj, path)
-    except (RuntimeError, OSError) as e:
-        print(f"Direct save to {path} failed: {e}. Retrying via local temp file...")
-        # Save to a local temp file first (guaranteed to be on local disk)
-        fd, tmp_path = tempfile.mkstemp(suffix=".pt")
-        os.close(fd)
-        
-        try:
-            torch.save(obj, tmp_path)
-            # Atomic-ish move/copy to final destination
-            shutil.move(tmp_path, path)
-            print(f"Successfully saved to {path} via temp file.")
-        except Exception as e2:
-            print(f"Failed to save {path} even with temp fallback: {e2}")
-            # Clean up temp file if it still exists
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            raise e2
 
 
 def _summary_from_eval(eval_rows: List[Dict[str, Any]], n_tasks: int) -> Dict[str, float]:
@@ -248,9 +220,33 @@ def run_lm_experiment(
     prev_k = float(model_cfg.max_k)
     prev_replay = 0.10
 
-    for task_id in range(n_tasks):
+    # Progress bars: counts + elapsed only (no ETA).
+    bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}] {rate_fmt}"
+
+    task_iter = range(n_tasks)
+    if train_cfg.show_progress:
+        desc = f"{env.name}:{variant} E{model_cfg.n_experts} seed{train_cfg.seed}"
+        task_iter = tqdm(task_iter, total=n_tasks, desc=desc, bar_format=bar_format)
+
+    for task_id in task_iter:
         for epoch in range(train_cfg.epochs_per_task):
-            for step_in_task, (xb, yb) in enumerate(train_loaders[task_id]):
+            step_loader = train_loaders[task_id]
+            if train_cfg.show_progress and train_cfg.progress_steps:
+                try:
+                    total_steps = len(step_loader)
+                except Exception:
+                    total_steps = None
+                if train_cfg.max_steps_per_task is not None and total_steps is not None:
+                    total_steps = min(total_steps, int(train_cfg.max_steps_per_task) + 1)
+                step_loader = tqdm(
+                    step_loader,
+                    total=total_steps,
+                    desc=f"task{task_id} ep{epoch}",
+                    leave=False,
+                    bar_format=bar_format,
+                )
+
+            for step_in_task, (xb, yb) in enumerate(step_loader):
                 xb, yb = xb.to(device), yb.to(device)
 
                 # ----- choose action / routing -----
@@ -388,6 +384,24 @@ def run_lm_experiment(
                         }
                     )
 
+                # Optional live postfix updates for the step progress bar (no ETA)
+                if (
+                    train_cfg.show_progress
+                    and train_cfg.progress_steps
+                    and hasattr(step_loader, "set_postfix")
+                    and (step_in_task % max(1, int(train_cfg.progress_postfix_every))) == 0
+                ):
+                    try:
+                        step_loader.set_postfix(
+                            {
+                                "loss": f"{float(loss.item()):.3f}",
+                                "k": int(action.get("k", -1)),
+                                "replay": f"{float(replay_ratio):.2f}",
+                            }
+                        )
+                    except Exception:
+                        pass
+
                 # Add online batch to buffer
                 buffer.add_batch(xb, yb)
 
@@ -412,7 +426,7 @@ def run_lm_experiment(
             eval_rows.append({"task_trained": task_id, "task_eval": j, "ppl": ppl})
 
         # checkpoint
-        robust_save_ckpt({"model": model.state_dict(), "opt": opt.state_dict(), "task": task_id}, os.path.join(exp_dir, f"ckpt_task{task_id}.pt"))
+        torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "task": task_id}, os.path.join(exp_dir, f"ckpt_task{task_id}.pt"))
 
     # Final test evaluation (mean over tasks)
     final_test_ppls = [eval_ppl(model, test_loaders[t]) for t in range(n_tasks)]

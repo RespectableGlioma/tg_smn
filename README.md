@@ -1,59 +1,69 @@
-# TG-SMN: Thermodynamically-governed Sparse Memory Networks
+# TG-SMN Experiments
 
-This repository contains the experimental codebase for **TG-SMN**, a project investigating **continual learning** in language models using **sparse memory networks** (Mixture-of-Experts) controlled by a **Thermodynamically-Integrated Update Rule (TIUR)**.
+This repository packages the TG-SMN experimental code as importable Python modules.
 
-The system features a **Hierarchical Sparse Expert** architecture where a learned or fixed controller dynamically modulates hyperparameters (like sparsity $k$, replay ratio, and routing noise) based on thermodynamic signals (e.g., dissipation/loss gradients) to balance stability and plasticity during continual learning tasks.
+The intended workflow is:
 
-## Key Components
+1. Use the **root notebook** `TG_SMN_Run.ipynb` as the top-level interface.
+2. The notebook calls library functions to:
+   - build environments (WikiText-2 permuted-vocab; multi-domain continual LM)
+   - run baselines and TG-SMN variants
+   - run hyperparameter / expert-count / seed sweeps
+   - load and visualize results
 
--   **Models (`tg_smn/models`):**
-    -   **Transformer LM:** Standard dense Transformer baselines.
-    -   **Sparse Memory LM:** A hierarchical Mixture-of-Experts (MoE) Transformer. It employs a two-stage routing mechanism (Group $\to$ Expert) to efficiently access a large memory of low-rank experts.
--   **Controllers (`tg_smn/controllers`):**
-    -   **Learned Controller:** An RNN-based meta-learner optimized via Reinforcement Learning (PPO-like) to adaptively set system hyperparameters (sparsity, noise, replay) in real-time.
-    -   **Fixed Controller:** Static baseline strategies.
--   **Environments (`tg_smn/envs`):**
-    -   **Permuted WikiText-2:** A continual learning benchmark where the vocabulary is permuted or drifted over task sequences.
-    -   **Multi-Domain:** A sequence of distinct text domains (e.g., WikiText, PTB, AGNews) to test domain adaptation and forgetting.
--   **Training (`tg_smn/train`):**
-    -   Supports Experience Replay, Fisher Information Matrix (FIM) regularization, and standard optimization loops.
+## Quickstart (Colab)
 
-## Usage
+1. Upload / clone this repo.
+2. In Colab:
 
-The primary entry point for all experiments is the **Jupyter Notebook**:
+```python
+!pip -q install -e .
+```
 
-`TG_SMN_Run.ipynb`
+3. Open `TG_SMN_Run.ipynb` (repo root) and run it top-to-bottom.
 
-This notebook orchestrates the entire workflow:
-1.  **Setup:** Installs dependencies and configures the environment.
-2.  **Configuration:** Defines model, data, and controller hyperparameters.
-3.  **Execution:** Runs training loops, baselines, and parameter sweeps.
-4.  **Analysis:** Loads checkpoints, visualizes metrics (loss, expert utilization), and compares controller strategies.
+Notes:
+- If you open the notebook from Google Drive or GitHub, Colab's working directory is often `/content`.
+  The first cell in the notebook will search for the repo root and `cd` into it automatically.
 
-## Installation & Quickstart
+## Notes on Hugging Face `datasets>=4.0`
 
-1.  **Clone the repository.**
-2.  **Install dependencies:**
-    ```bash
-    pip install -e .
-    ```
-    *Note: Designed for usage in Google Colab; local setups may require PyTorch installation matching your CUDA version.*
-3.  **Run the Notebook:** Open `TG_SMN_Run.ipynb` and execute cells sequentially.
+As of `datasets>=4.0.0`, loading *script-based* datasets is no longer supported (you may see
+`RuntimeError: Dataset scripts are no longer supported, but found <name>.py`).
 
-## Directory Structure
+This repo avoids script-based loaders in the multi-domain environment by using parquet-only
+sources where needed (e.g. PTB). If you add new domains, prefer datasets that are available
+as standard parquet/arrow exports.
 
-| Path | Description |
-| :--- | :--- |
-| `TG_SMN_Run.ipynb` | **Main Experiment Notebook** (Entry Point) |
-| `tg_smn/` | Source code package |
-| ├── `models/` | Transformer architectures (Dense & Sparse MoE) |
-| ├── `controllers/` | Meta-learning controllers (Learned RNN & Fixed) |
-| ├── `envs/` | Data loaders for Continual Learning benchmarks |
-| ├── `train/` | Training loops, replay buffers, and logging |
-| ├── `sweep.py` | Hyperparameter grid search utilities |
-| └── `config.py` | Dataclasses for all configuration schemas |
+## Outputs
 
-## Notes
+Each run writes to an output directory you specify (Drive recommended in Colab).
 
--   **Datasets:** The multi-domain environment leverages Hugging Face Datasets (using Parquet where available) to avoid script-loading security restrictions.
--   **Outputs:** Experiment artifacts (metrics, checkpoints, configs) are saved to a specified output directory (e.g., Google Drive in Colab).
+A run directory contains:
+
+- `config.json`
+- `metrics.csv` (step-level controller + TIUR proxy signals)
+- `eval.csv` (task-level evaluation)
+- `summary.json`
+- `ckpt_task*.pt`
+
+The sweep runner additionally writes a `grid_results.csv` at the sweep root.
+
+## Progress tracking
+
+Long sweeps can take a while. `run_grid(...)` displays a progress bar and also writes:
+
+- `grid_progress.json` (snapshot: total/done/skipped/failed, elapsed seconds, current job)
+- `grid_results.jsonl` (append-only stream of results so partial progress isn't lost on runtime reset)
+
+These do **not** include time-to-completion estimates by default; they report counts + elapsed time only.
+
+## Design
+
+- `tg_smn/envs/*`: environment builders
+- `tg_smn/models/*`: dense and hierarchical-sparse Transformer LM
+- `tg_smn/controllers/*`: fixed + learned RNN controllers
+- `tg_smn/train/*`: training loops and logging
+- `tg_smn/sweep.py`: grid sweeps + skip-existing
+- `tg_smn/analysis.py`: loading + plotting helpers
+
