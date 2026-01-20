@@ -67,3 +67,9 @@ These do **not** include time-to-completion estimates by default; they report co
 - `tg_smn/sweep.py`: grid sweeps + skip-existing
 - `tg_smn/analysis.py`: loading + plotting helpers
 
+
+
+## Colab disk-space tip
+
+If you run large multi-domain sweeps in Colab, move Hugging Face caches to Google Drive to avoid filling `/tmp` and the local disk.
+The root `TG_SMN_Run.ipynb` notebook includes a cell that mounts Drive and sets `HF_HOME`, `HF_DATASETS_CACHE`, and related variables before importing datasets.

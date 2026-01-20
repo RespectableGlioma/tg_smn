@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import random
 from dataclasses import asdict
 from typing import Dict, List, Optional, Tuple
@@ -18,7 +20,7 @@ def _chunks(lst: List[str], n: int) -> List[str]:
 
 
 def _load_wt2_docs(max_docs: Optional[int] = None) -> Tuple[List[str], List[str]]:
-    ds = load_dataset("wikitext", "wikitext-2-raw-v1")
+    ds = load_dataset("wikitext", "wikitext-2-raw-v1", cache_dir=os.environ.get("HF_DATASETS_CACHE"))
     train_docs = split_into_docs(ds["train"]["text"])
     test_docs = split_into_docs(ds["test"]["text"])
     if max_docs is not None:
@@ -47,7 +49,7 @@ def _load_ptb_docs(max_docs: Optional[int] = None, concat_n: int = 20) -> Tuple[
         "validation": f"hf://datasets/{repo}@main/{base}/validation/*.parquet",
         "test": f"hf://datasets/{repo}@main/{base}/test/*.parquet",
     }
-    ds = load_dataset("parquet", data_files=data_files)
+    ds = load_dataset("parquet", data_files=data_files, cache_dir=os.environ.get("HF_DATASETS_CACHE"))
 
     def pick_text_column(split) -> str:
         # Prefer common names; otherwise choose the first string column.
@@ -82,7 +84,7 @@ def _load_ptb_docs(max_docs: Optional[int] = None, concat_n: int = 20) -> Tuple[
 
 
 def _load_agnews_docs(max_docs: Optional[int] = None) -> Tuple[List[str], List[str]]:
-    ds = load_dataset("ag_news")
+    ds = load_dataset("ag_news", cache_dir=os.environ.get("HF_DATASETS_CACHE"))
     train_docs = [x["text"] for x in ds["train"] if (x.get("text") or "").strip()]
     test_docs = [x["text"] for x in ds["test"] if (x.get("text") or "").strip()]
     if max_docs is not None:
@@ -92,7 +94,7 @@ def _load_agnews_docs(max_docs: Optional[int] = None) -> Tuple[List[str], List[s
 
 
 def _load_imdb_docs(max_docs: Optional[int] = None) -> Tuple[List[str], List[str]]:
-    ds = load_dataset("imdb")
+    ds = load_dataset("imdb", cache_dir=os.environ.get("HF_DATASETS_CACHE"))
     train_docs = [x["text"] for x in ds["train"] if (x.get("text") or "").strip()]
     test_docs = [x["text"] for x in ds["test"] if (x.get("text") or "").strip()]
     if max_docs is not None:

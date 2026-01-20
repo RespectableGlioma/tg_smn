@@ -6,13 +6,9 @@ This package contains:
 - fixed and learned controllers
 - training harness and sweep utilities
 
-The main entry points intended for notebook use:
-
-- tg_smn.envs.build_env(...)
-- tg_smn.sweep.run_grid(...)
-- tg_smn.analysis.load_grid_results(...)
+Note: keep package import side-effects minimal. Heavy dependencies (e.g. Hugging Face `datasets`)
+are imported inside specific modules/functions. This allows notebooks to configure cache locations
+(HF_HOME, HF_DATASETS_CACHE, etc.) before importing those heavy modules.
 """
 
-from . import config
-from .sweep import run_grid
-
+__all__ = ["config"]

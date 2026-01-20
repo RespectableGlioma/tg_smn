@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Literal, Optional
 class DataCfg:
     seq_len: int = 64
     batch_size: int = 32
-    num_workers: int = 2
+    num_workers: int = 0  # Colab-friendly default (avoids /tmp multiprocessing spill)
 
 
 @dataclass

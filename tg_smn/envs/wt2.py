@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import random
 from dataclasses import asdict
 from typing import List
@@ -54,7 +56,7 @@ def build_wt2_env(cfg: WT2EnvCfg, *, min_freq: int = 2) -> EnvData:
     If cfg.permuted_vocab=True, each task applies a different permutation to token IDs (excluding specials).
     This creates an adversarial nonstationary environment similar to PermutedMNIST.
     """
-    ds = load_dataset("wikitext", "wikitext-2-raw-v1")
+    ds = load_dataset("wikitext", "wikitext-2-raw-v1", cache_dir=os.environ.get("HF_DATASETS_CACHE"))
     train_docs = split_into_docs(ds["train"]["text"])
 
     if cfg.max_docs_total is not None:
