@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 import time
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -66,6 +67,11 @@ def run_grid(
     device = get_device(device)
     out_root = ensure_dir(out_root)
 
+    # Fallback logging location (local tmp dir) used only if the primary out_root
+    # becomes temporarily unavailable (e.g., Drive mount issues). This prevents
+    # long sweeps from crashing due to transient filesystem errors.
+    fallback_root = ensure_dir(os.path.join(tempfile.gettempdir(), "tg_smn_fallback"))
+
     # Cache built environments under the sweep root so long sweeps are resumable
     # across runtime resets.
     env_cache_dir = ensure_dir(os.path.join(out_root, "_env_cache"))
@@ -96,9 +102,55 @@ def run_grid(
     total_runs = len(env_cfgs) * len(experts_list) * len(seeds) * per_variant
 
     started_at = time.time()
+
+    # Fallback log file paths (written only if out_root becomes unavailable).
+    # The tag avoids collisions if multiple sweeps run in the same runtime.
+    _tag = f"{os.path.basename(out_root.rstrip(os.sep))}_{int(started_at)}"
+    fallback_jsonl_path = os.path.join(fallback_root, f"{_tag}_grid_results.jsonl")
+    fallback_progress_path = os.path.join(fallback_root, f"{_tag}_grid_progress.json")
+
     done = 0
     skipped = 0
     failed = 0
+
+    def _safe_append_jsonl(row: Dict[str, Any]) -> None:
+        line = json.dumps(row) + "\n"
+        # Try primary location.
+        try:
+            ensure_dir(out_root)
+            with open(jsonl_path, "a", encoding="utf-8") as f:
+                f.write(line)
+            return
+        except Exception:
+            # Try to recreate parent dirs and retry once.
+            try:
+                ensure_dir(os.path.dirname(jsonl_path) or out_root)
+                with open(jsonl_path, "a", encoding="utf-8") as f:
+                    f.write(line)
+                return
+            except Exception:
+                # Fall back to local tmp dir so the sweep doesn't crash.
+                ensure_dir(os.path.dirname(fallback_jsonl_path) or fallback_root)
+                with open(fallback_jsonl_path, "a", encoding="utf-8") as f:
+                    f.write(line)
+
+    def _safe_write_progress(snap: Dict[str, Any]) -> None:
+        # Atomic-ish write with fallback.
+        def _write_atomic(path: str) -> None:
+            ensure_dir(os.path.dirname(path) or out_root)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(snap, f, indent=2)
+            os.replace(tmp, path)
+
+        try:
+            _write_atomic(progress_path)
+        except Exception:
+            try:
+                _write_atomic(fallback_progress_path)
+            except Exception:
+                # Last resort: don't crash the sweep for progress logging.
+                return
 
     def write_progress(current: Optional[Dict[str, Any]] = None) -> None:
         snap = {
@@ -108,12 +160,10 @@ def run_grid(
             "failed": int(failed),
             "elapsed_sec": float(time.time() - started_at),
             "current": current,
+            "fallback_jsonl_path": fallback_jsonl_path,
+            "fallback_progress_path": fallback_progress_path,
         }
-        # Atomic-ish write
-        tmp = progress_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(snap, f, indent=2)
-        os.replace(tmp, progress_path)
+        _safe_write_progress(snap)
 
     pbar = tqdm(total=total_runs, desc="TG-SMN sweep", bar_format=bar_format)
     write_progress(current=None)
@@ -126,10 +176,20 @@ def run_grid(
         cache_path = os.path.join(env_cache_dir, f"{env_cfg.name}_{cfg_sig}.pt")
 
         if os.path.exists(cache_path):
-            env = torch.load(cache_path)
+            try:
+                env = torch.load(cache_path)
+            except Exception:
+                # If the cache is corrupted/incomplete, rebuild.
+                env = build_env(env_cfg)
         else:
             env = build_env(env_cfg)
+
+        # Best-effort write of env cache.
+        try:
+            ensure_dir(os.path.dirname(cache_path) or env_cache_dir)
             torch.save(env, cache_path)
+        except Exception:
+            pass
 
         for E in experts_list:
             # Update model cfg for this run
@@ -161,8 +221,7 @@ def run_grid(
                                 s = load_json(summary_path)
                                 row = {"env": env.name, "variant": variant, "ablation": abl.name, "n_experts": E, "seed": seed, "status": "skipped", **s}
                                 rows.append(row)
-                                with open(jsonl_path, "a", encoding="utf-8") as f:
-                                    f.write(json.dumps(row) + "\n")
+                                _safe_append_jsonl(row)
                                 skipped += 1
                                 done += 1
                                 pbar.update(1)
@@ -203,8 +262,7 @@ def run_grid(
                                 }
                                 pbar.write(f"[ERROR] {current} -> {type(e).__name__}: {e}")
                             rows.append(row)
-                            with open(jsonl_path, "a", encoding="utf-8") as f:
-                                f.write(json.dumps(row) + "\n")
+                            _safe_append_jsonl(row)
                             done += 1
                             pbar.update(1)
                             write_progress(current=None)
@@ -219,8 +277,7 @@ def run_grid(
                             s = load_json(summary_path)
                             row = {"env": env.name, "variant": variant, "ablation": "none", "n_experts": E, "seed": seed, "status": "skipped", **s}
                             rows.append(row)
-                            with open(jsonl_path, "a", encoding="utf-8") as f:
-                                f.write(json.dumps(row) + "\n")
+                            _safe_append_jsonl(row)
                             skipped += 1
                             done += 1
                             pbar.update(1)
@@ -256,8 +313,7 @@ def run_grid(
                             }
                             pbar.write(f"[ERROR] {current} -> {type(e).__name__}: {e}")
                         rows.append(row)
-                        with open(jsonl_path, "a", encoding="utf-8") as f:
-                            f.write(json.dumps(row) + "\n")
+                        _safe_append_jsonl(row)
                         done += 1
                         pbar.update(1)
                         write_progress(current=None)
@@ -266,5 +322,13 @@ def run_grid(
     write_progress(current=None)
 
     df = pd.DataFrame(rows)
-    df.to_csv(os.path.join(out_root, "grid_results.csv"), index=False)
+    # Best-effort write. If out_root is temporarily unavailable, write to fallback.
+    try:
+        ensure_dir(out_root)
+        df.to_csv(os.path.join(out_root, "grid_results.csv"), index=False)
+    except Exception:
+        try:
+            df.to_csv(os.path.join(fallback_root, f"{_tag}_grid_results.csv"), index=False)
+        except Exception:
+            pass
     return df

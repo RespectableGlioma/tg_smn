@@ -134,6 +134,48 @@ def run_lm_experiment(
     set_seed(train_cfg.seed)
     exp_dir = ensure_dir(os.path.join(out_dir, exp_name))
 
+    # Long sweeps on Colab (especially writing to Drive) can occasionally hit
+    # transient filesystem issues. Use best-effort I/O so training doesn't
+    # crash due to a missed directory creation or a temporary mount hiccup.
+    def _safe_makedirs(path: str) -> None:
+        try:
+            ensure_dir(path)
+        except Exception:
+            # If ensure_dir fails, we don't want to crash training; later writes
+            # will retry.
+            pass
+
+    def _safe_torch_save(obj: Any, path: str) -> None:
+        parent = os.path.dirname(path) or exp_dir
+        for _ in range(2):
+            try:
+                _safe_makedirs(parent)
+                torch.save(obj, path)
+                return
+            except Exception:
+                continue
+        # If saving still fails, proceed without checkpointing.
+
+    def _safe_to_csv(df: pd.DataFrame, path: str) -> None:
+        parent = os.path.dirname(path) or exp_dir
+        for _ in range(2):
+            try:
+                _safe_makedirs(parent)
+                df.to_csv(path, index=False)
+                return
+            except Exception:
+                continue
+
+    def _safe_save_json(path: str, obj: Any) -> None:
+        parent = os.path.dirname(path) or exp_dir
+        for _ in range(2):
+            try:
+                _safe_makedirs(parent)
+                save_json(path, obj)
+                return
+            except Exception:
+                continue
+
     # Build loaders
     train_loaders, val_loaders, test_loaders = make_task_loaders(
         env, seq_len=data_cfg.seq_len, batch_size=data_cfg.batch_size, num_workers=data_cfg.num_workers
@@ -199,7 +241,7 @@ def run_lm_experiment(
             "drop_reward_kl": learned_drop_reward_kl,
         },
     }
-    save_json(os.path.join(exp_dir, "config.json"), cfg_dump)
+    _safe_save_json(os.path.join(exp_dir, "config.json"), cfg_dump)
 
     metrics_rows: List[Dict[str, Any]] = []
     eval_rows: List[Dict[str, Any]] = []
@@ -426,7 +468,10 @@ def run_lm_experiment(
             eval_rows.append({"task_trained": task_id, "task_eval": j, "ppl": ppl})
 
         # checkpoint
-        torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "task": task_id}, os.path.join(exp_dir, f"ckpt_task{task_id}.pt"))
+        _safe_torch_save(
+            {"model": model.state_dict(), "opt": opt.state_dict(), "task": task_id},
+            os.path.join(exp_dir, f"ckpt_task{task_id}.pt"),
+        )
 
     # Final test evaluation (mean over tasks)
     final_test_ppls = [eval_ppl(model, test_loaders[t]) for t in range(n_tasks)]
@@ -444,8 +489,8 @@ def run_lm_experiment(
     }
 
     # Write logs
-    pd.DataFrame(metrics_rows).to_csv(os.path.join(exp_dir, "metrics.csv"), index=False)
-    pd.DataFrame(eval_rows).to_csv(os.path.join(exp_dir, "eval.csv"), index=False)
-    save_json(os.path.join(exp_dir, "summary.json"), summary)
+    _safe_to_csv(pd.DataFrame(metrics_rows), os.path.join(exp_dir, "metrics.csv"))
+    _safe_to_csv(pd.DataFrame(eval_rows), os.path.join(exp_dir, "eval.csv"))
+    _safe_save_json(os.path.join(exp_dir, "summary.json"), summary)
 
     return summary
