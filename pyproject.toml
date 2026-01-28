@@ -22,4 +22,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["tg_smn", "tg_smn.envs", "tg_smn.models", "tg_smn.controllers", "tg_smn.train"]
+packages = ["tg_smn", "tg_smn.envs", "tg_smn.models", "tg_smn.controllers", "tg_smn.train", "world_models", "world_models.stoch_muzero_harness", "world_models.stoch_muzero_harness.games"]

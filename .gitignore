@@ -79,6 +79,10 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Colab notebooks with outputs (keep clean template only)
+**/Run_StochMuZeroHarness_Benchmarks*.ipynb
+!Run_StochMuZeroHarness_Benchmarks.ipynb
+
 # IPython
 profile_default/
 ipython_config.py
