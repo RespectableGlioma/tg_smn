@@ -5,6 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
+.DS_Store
 
 # Distribution / packaging
 .Python
@@ -77,6 +78,10 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# Colab notebooks with outputs (keep clean template only)
+**/Run_StochMuZeroHarness_Benchmarks*.ipynb
+!Run_StochMuZeroHarness_Benchmarks.ipynb
 
 # IPython
 profile_default/
