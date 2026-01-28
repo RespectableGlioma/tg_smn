@@ -469,8 +469,17 @@ def main():
         aux_logits0 = model.decode_aux(s)
         aux_loss0 = 0.0
         for k, logits in aux_logits0.items():
-            aux_loss0 = aux_loss0 + aux_loss_from_logits(logits, aux_targets[k][:, 0])
-
+            if game.name == "2048" and k == "grid":
+                # Use weighted loss for perception too!
+                # We use changed_alpha=1.0 because 'changing' doesn't apply to a static image
+                aux_loss0 = aux_loss0 + after_aux_loss_2048_weighted(
+                    logits, aux_targets[k][:, 0], aux_targets["grid"][:, 0], 
+                    empty_weight=args.empty_weight, 
+                    changed_alpha=1.0
+                )
+            else:
+                aux_loss0 = aux_loss0 + aux_loss_from_logits(logits, aux_targets[k][:, 0])
+        
         style_loss = torch.tensor(0.0, device=device)
         style_logits = model.predict_style_logits(u)
         if style_logits is not None:
