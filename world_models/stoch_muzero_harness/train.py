@@ -253,6 +253,43 @@ def chance_mask_2048(cur_grid: torch.Tensor, after_grid: torch.Tensor, chance_si
     return mask
 
 
+def compute_2048_metrics(pred_grid: np.ndarray, target_grid: np.ndarray, cur_grid: np.ndarray) -> Dict[str, float]:
+    """
+    Compute diagnostic metrics for 2048 afterstate prediction.
+
+    Args:
+        pred_grid: predicted afterstate grid (4, 4) int64
+        target_grid: ground truth afterstate grid (4, 4) int64
+        cur_grid: current state grid before action (4, 4) int64
+
+    Returns:
+        Dict with keys: after_cell_acc, after_nonempty_acc, after_changed_acc
+    """
+    # Per-cell accuracy (mean over 16 cells)
+    correct_cells = (pred_grid == target_grid)
+    after_cell_acc = float(np.mean(correct_cells))
+
+    # Accuracy on non-empty target cells
+    nonempty_mask = (target_grid != 0)
+    if np.any(nonempty_mask):
+        after_nonempty_acc = float(np.mean(correct_cells[nonempty_mask]))
+    else:
+        after_nonempty_acc = 1.0  # all empty, trivially correct if all predicted empty
+
+    # Accuracy on cells that changed due to the move
+    changed_mask = (cur_grid != target_grid)
+    if np.any(changed_mask):
+        after_changed_acc = float(np.mean(correct_cells[changed_mask]))
+    else:
+        after_changed_acc = 1.0  # no cells changed (illegal move?)
+
+    return {
+        "after_cell_acc": after_cell_acc,
+        "after_nonempty_acc": after_nonempty_acc,
+        "after_changed_acc": after_changed_acc,
+    }
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--game", type=str, choices=["othello", "2048"], default="othello")
@@ -510,6 +547,12 @@ def main():
                 exact_after = 0
                 chance_acc = 0
 
+                # New diagnostic metrics for 2048
+                after_cell_acc_sum = 0.0
+                after_nonempty_acc_sum = 0.0
+                after_changed_acc_sum = 0.0
+                chance_nll_teacher_mask_sum = 0.0
+
                 for k in range(K):
                     a = int(eval_ep.actions[t0 + k])
                     c = int(eval_ep.chances[t0 + k])
@@ -530,6 +573,16 @@ def main():
                         ok_after = ok_after and np.array_equal(pr, gt_after_aux[kk])
                     exact_after += int(ok_after)
 
+                    # Compute per-cell metrics for 2048
+                    if game.name == "2048":
+                        pred_grid = pr_after_aux["grid"]
+                        target_grid = gt_after_aux["grid"]
+                        cur_grid = eval_ep.aux["grid"][t0 + k]
+                        metrics_dict = compute_2048_metrics(pred_grid, target_grid, cur_grid)
+                        after_cell_acc_sum += metrics_dict["after_cell_acc"]
+                        after_nonempty_acc_sum += metrics_dict["after_nonempty_acc"]
+                        after_changed_acc_sum += metrics_dict["after_changed_acc"]
+
                     # chance accuracy (argmax under true mask)
                     if game.chance_size <= 1:
                         chance_acc += 1
@@ -544,6 +597,11 @@ def main():
                         logp = masked_log_softmax(ch_logits.unsqueeze(0), cmask.unsqueeze(0), dim=-1)[0]
                         c_hat = int(torch.argmax(logp).item())
                         chance_acc += int(c_hat == c)
+
+                        # Compute chance NLL using teacher mask
+                        if game.name == "2048":
+                            true_chance_logp = logp[c].item()
+                            chance_nll_teacher_mask_sum += -true_chance_logp
 
                     # transition teacher-forced
                     s = model.next_state(a_s, c_t)
@@ -569,10 +627,23 @@ def main():
                 pr_imgs = np.stack(pr_imgs, axis=0)
 
                 _save_compare_strip_png(outdir / f"rollout_gt_vs_pred_step{step}.png", gt_imgs, pr_imgs)
-                print(
+
+                eval_msg = (
                     f"[EVAL step {step}] exact_after={exact_after}/{K} | "
-                    f"chance_acc={chance_acc}/{K} | exact_next={exact_next}/{K} | saved rollout png"
+                    f"chance_acc={chance_acc}/{K} | exact_next={exact_next}/{K}"
                 )
+
+                # Add 2048-specific metrics
+                if game.name == "2048":
+                    eval_msg += (
+                        f" | after_cell_acc={after_cell_acc_sum/K:.3f}"
+                        f" | after_nonempty_acc={after_nonempty_acc_sum/K:.3f}"
+                        f" | after_changed_acc={after_changed_acc_sum/K:.3f}"
+                        f" | chance_nll_teacher_mask={chance_nll_teacher_mask_sum/K:.3f}"
+                    )
+
+                eval_msg += " | saved rollout png"
+                print(eval_msg)
 
             model.train()
 

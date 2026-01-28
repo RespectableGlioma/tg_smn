@@ -59,6 +59,43 @@ def chance_mask_2048(cur_grid: torch.Tensor, after_grid: torch.Tensor, chance_si
     return mask
 
 
+def compute_2048_metrics(pred_grid: np.ndarray, target_grid: np.ndarray, cur_grid: np.ndarray) -> Dict[str, float]:
+    """
+    Compute diagnostic metrics for 2048 afterstate prediction.
+
+    Args:
+        pred_grid: predicted afterstate grid (4, 4) int64
+        target_grid: ground truth afterstate grid (4, 4) int64
+        cur_grid: current state grid before action (4, 4) int64
+
+    Returns:
+        Dict with keys: after_cell_acc, after_nonempty_acc, after_changed_acc
+    """
+    # Per-cell accuracy (mean over 16 cells)
+    correct_cells = (pred_grid == target_grid)
+    after_cell_acc = float(np.mean(correct_cells))
+
+    # Accuracy on non-empty target cells
+    nonempty_mask = (target_grid != 0)
+    if np.any(nonempty_mask):
+        after_nonempty_acc = float(np.mean(correct_cells[nonempty_mask]))
+    else:
+        after_nonempty_acc = 1.0  # all empty, trivially correct if all predicted empty
+
+    # Accuracy on cells that changed due to the move
+    changed_mask = (cur_grid != target_grid)
+    if np.any(changed_mask):
+        after_changed_acc = float(np.mean(correct_cells[changed_mask]))
+    else:
+        after_changed_acc = 1.0  # no cells changed (illegal move?)
+
+    return {
+        "after_cell_acc": after_cell_acc,
+        "after_nonempty_acc": after_nonempty_acc,
+        "after_changed_acc": after_changed_acc,
+    }
+
+
 def eval_prediction(game, model: StochMuZeroNet, episodes: int, max_steps: int, seed: int, device: torch.device):
     rng = np.random.RandomState(seed)
 
@@ -66,6 +103,12 @@ def eval_prediction(game, model: StochMuZeroNet, episodes: int, max_steps: int, 
     exact_next = 0
     chance_acc = 0
     total = 0
+
+    # New diagnostic metrics for 2048
+    after_cell_acc_sum = 0.0
+    after_nonempty_acc_sum = 0.0
+    after_changed_acc_sum = 0.0
+    chance_nll_teacher_mask_sum = 0.0
 
     for _ in range(episodes):
         state = game.reset(rng)
@@ -103,6 +146,16 @@ def eval_prediction(game, model: StochMuZeroNet, episodes: int, max_steps: int, 
                 ok_after = ok_after and np.array_equal(pr, after_aux[k])
             exact_after += int(ok_after)
 
+            # Compute per-cell metrics for 2048
+            if game.name == "2048":
+                pred_grid = torch.argmax(after_logits["grid"], dim=1)[0].cpu().numpy()
+                target_grid = after_aux["grid"]
+                cur_grid = aux0["grid"]
+                metrics_dict = compute_2048_metrics(pred_grid, target_grid, cur_grid)
+                after_cell_acc_sum += metrics_dict["after_cell_acc"]
+                after_nonempty_acc_sum += metrics_dict["after_nonempty_acc"]
+                after_changed_acc_sum += metrics_dict["after_changed_acc"]
+
             if game.chance_size <= 1:
                 chance_acc += 1
             else:
@@ -114,6 +167,12 @@ def eval_prediction(game, model: StochMuZeroNet, episodes: int, max_steps: int, 
                 logp = masked_log_softmax(ch_logits, cmask, dim=-1)
                 c_hat = int(torch.argmax(logp[0]).item())
                 chance_acc += int(c_hat == c)
+
+                # Compute chance NLL using teacher mask
+                if game.name == "2048":
+                    # NLL of true chance outcome under teacher mask
+                    true_chance_logp = logp[0, c].item()
+                    chance_nll_teacher_mask_sum += -true_chance_logp
 
             s1 = model.next_state(a_s, c_t)
             nxt_logits = model.decode_aux(s1)
@@ -138,12 +197,23 @@ def eval_prediction(game, model: StochMuZeroNet, episodes: int, max_steps: int, 
         print("No transitions evaluated.")
         return
 
-    print(
+    result = (
         f"Prediction eval over {total} transitions: "
         f"exact_after={exact_after/total:.3f} | "
         f"chance_acc={chance_acc/total:.3f} | "
         f"exact_next={exact_next/total:.3f}"
     )
+
+    # Add 2048-specific metrics if applicable
+    if game.name == "2048" and total > 0:
+        result += (
+            f" | after_cell_acc={after_cell_acc_sum/total:.3f}"
+            f" | after_nonempty_acc={after_nonempty_acc_sum/total:.3f}"
+            f" | after_changed_acc={after_changed_acc_sum/total:.3f}"
+            f" | chance_nll_teacher_mask={chance_nll_teacher_mask_sum/total:.3f}"
+        )
+
+    print(result)
 
 
 def eval_mcts_2048(game, model: StochMuZeroNet, episodes: int, max_steps: int, seed: int, device: torch.device,
