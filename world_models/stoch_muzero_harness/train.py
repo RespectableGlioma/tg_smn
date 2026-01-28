@@ -226,6 +226,52 @@ def aux_loss_from_logits(logits: torch.Tensor, target: torch.Tensor) -> torch.Te
     return F.cross_entropy(logits_f, target_f, reduction="mean")
 
 
+def after_aux_loss_2048_weighted(
+    logits: torch.Tensor,
+    target: torch.Tensor,
+    cur_grid: torch.Tensor,
+    empty_weight: float = 0.2,
+    changed_alpha: float = 3.0,
+) -> torch.Tensor:
+    """
+    Weighted afterstate aux loss for 2048.
+
+    Args:
+        logits: [B, 16, 4, 4] - predicted logits (16 classes for tile exponents)
+        target: [B, 4, 4] - ground truth afterstate grid
+        cur_grid: [B, 4, 4] - current grid before action (to identify changed cells)
+        empty_weight: weight for empty cells (class 0)
+        changed_alpha: multiplicative boost for cells that changed due to the move
+
+    Returns:
+        Weighted cross-entropy loss
+    """
+    B, C, H, W = logits.shape
+    assert C == 16, "Expected 16 classes for 2048 tile exponents"
+
+    # Compute per-cell cross-entropy without reduction
+    logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, C)  # [B*H*W, C]
+    target_flat = target.reshape(-1)  # [B*H*W]
+    loss_per_cell = F.cross_entropy(logits_flat, target_flat, reduction="none")  # [B*H*W]
+    loss_per_cell = loss_per_cell.view(B, H, W)  # [B, H, W]
+
+    # Create weight mask
+    weights = torch.ones_like(loss_per_cell)
+
+    # Downweight empty cells
+    empty_mask = (target == 0)
+    weights = torch.where(empty_mask, torch.tensor(empty_weight, device=logits.device), weights)
+
+    # Upweight changed cells
+    changed_mask = (cur_grid != target)
+    weights = torch.where(changed_mask, weights * changed_alpha, weights)
+
+    # Apply weights and compute mean
+    weighted_loss = (loss_per_cell * weights).sum() / weights.sum()
+
+    return weighted_loss
+
+
 def policy_loss_soft(logits: torch.Tensor, target_probs: torch.Tensor, legal_mask: torch.Tensor) -> torch.Tensor:
     # logits: [B,A], target_probs: [B,A], legal_mask: [B,A]
     logp = masked_log_softmax(logits, legal_mask, dim=-1)
@@ -320,6 +366,10 @@ def main():
     p.add_argument("--w_after_aux", type=float, default=1.0)
     p.add_argument("--w_style", type=float, default=0.2)
     p.add_argument("--w_inv", type=float, default=1.0)
+
+    # 2048-specific loss reweighting
+    p.add_argument("--empty_weight", type=float, default=0.2, help="Weight for empty cells in afterstate loss (2048)")
+    p.add_argument("--changed_alpha", type=float, default=3.0, help="Multiplicative boost for changed cells in afterstate loss (2048)")
 
     args = p.parse_args()
 
@@ -442,7 +492,16 @@ def main():
             # after-aux (rule core) supervision
             after_logits = model.decode_after_aux(a_s)
             for kk, logits in after_logits.items():
-                after_aux_loss = after_aux_loss + aux_loss_from_logits(logits, after_aux_targets[kk][:, k])
+                if game.name == "2048" and kk == "grid":
+                    # Use weighted loss for 2048 grid prediction
+                    cur_grid_k = aux_targets["grid"][:, k]
+                    after_aux_loss = after_aux_loss + after_aux_loss_2048_weighted(
+                        logits, after_aux_targets[kk][:, k], cur_grid_k,
+                        empty_weight=args.empty_weight,
+                        changed_alpha=args.changed_alpha,
+                    )
+                else:
+                    after_aux_loss = after_aux_loss + aux_loss_from_logits(logits, after_aux_targets[kk][:, k])
 
             # chance prediction
             chance_logits = model.predict_chance_logits(a_s)  # [B,C]
