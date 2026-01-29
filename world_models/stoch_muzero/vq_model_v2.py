@@ -726,5 +726,9 @@ def _test_vq_world_model_v2():
     print("VQWorldModelV2 test passed!")
 
 
+# Alias for backwards compatibility with documented imports
+VQWorldModel = VQWorldModelV2
+
+
 if __name__ == '__main__':
     _test_vq_world_model_v2()
