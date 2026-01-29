@@ -273,9 +273,9 @@ def train(
         n_actions=n_actions,
         codebook_size=codebook_size,
         code_dim=code_dim,
-        ema_decay=0.95,        # Lower for faster adaptation
-        reset_threshold=2,      # Reset codes used < 2 times
-        reset_every=100,        # Check every 100 steps
+        ema_decay=0.95,            # Lower for faster adaptation
+        dead_code_threshold=2,     # Reset codes used < 2 times
+        reset_every=100,           # Check every 100 steps
     )
     
     model = VQWorldModel(cfg).to(device)
