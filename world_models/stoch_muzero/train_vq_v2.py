@@ -304,7 +304,7 @@ def train(
         optimizer.step()
         
         total_resets += losses['codes_reset']
-        best_usage = max(best_usage, losses['usage_ratio'])
+        best_usage = max(best_usage, losses['codebook_usage'])
         
         if step % 100 == 0:
             pbar.set_postfix({
@@ -317,8 +317,8 @@ def train(
         
         if step % 2000 == 0:
             stats = model.get_codebook_stats()
-            print(f"\n[Step {step}] Codebook: {stats['codes_used']}/{codebook_size} "
-                  f"({100*stats['codes_used']/codebook_size:.1f}%), "
+            print(f"\n[Step {step}] Codebook: {stats['active_codes']}/{codebook_size} "
+                  f"({100*stats['active_codes']/codebook_size:.1f}%), "
                   f"Total resets: {total_resets}")
     
     # Final analysis
@@ -329,7 +329,7 @@ def train(
     # Codebook stats
     stats = model.get_codebook_stats()
     print(f"Final codebook utilization:")
-    print(f"  Active codes: {stats['codes_used']}/{codebook_size} ({100*stats['codes_used']/codebook_size:.1f}%)")
+    print(f"  Active codes: {stats['active_codes']}/{codebook_size} ({100*stats['active_codes']/codebook_size:.1f}%)")
     print(f"  Best usage seen: {100*best_usage:.1f}%")
     print(f"  Total codes reset: {total_resets}")
     
