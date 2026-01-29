@@ -12,20 +12,16 @@ The intended workflow is:
    - load and visualize results
 
 ## TODO
-E. Concrete Next Steps (Prioritized)
+Next Steps (After These Experiments)
+Once you verify:
+✅ 2048 shows mix of rules + chance
+✅ Othello shows ~100% rules
+✅ Codebook is well-utilized
 
-Verify on Othello (immediate)
-
-Run v2 with dead code reset
-Should see near-zero entropy everywhere (fully deterministic)
-Codebook should capture board configurations
-
-
-Rule extraction visualization (1-2 days)
-
-Decode what each code represents visually
-Build transition graph: nodes=codes, edges=actions, color=entropy
-Compare discovered rules to actual 2048 rules
+Then we move to:
+VQ-MCTS - Tree search that only branches on high-entropy
+Transfer Learning - Train on style A, test on style B
+TG-SMN Integration - Rules = compress, Chance = don't memorize
 
 
 Planning benchmark (few days)
