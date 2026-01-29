@@ -73,3 +73,6 @@ These do **not** include time-to-completion estimates by default; they report co
 
 If you run large multi-domain sweeps in Colab, move Hugging Face caches to Google Drive to avoid filling `/tmp` and the local disk.
 The root `TG_SMN_Run.ipynb` notebook includes a cell that mounts Drive and sets `HF_HOME`, `HF_DATASETS_CACHE`, and related variables before importing datasets.
+
+## TODO
+I guess part of the challenge still though is that we'd like to bind the codes in the codebook to specific objects within an image to look for change over them... in nature this, itself, is often driven by dynamics... pixels that are largely invariant over frames (flow together) are "objects" for example since they exhibit some degree of togetherness. It would be great to somehow leverage a prior like this into the codebook learning? This perceptual problem could also probably be an entirely separate project.
