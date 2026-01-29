@@ -261,8 +261,9 @@ def train(
     n_actions = 4 if game.lower() == '2048' else 64
     obs, actions = generate_trajectories(game, n_trajectories, max_traj_len, img_size)
     
-    obs_t = torch.from_numpy(obs).to(device)
-    actions_t = torch.from_numpy(actions).to(device)
+    # Keep data on CPU, only move batches to GPU (saves ~663 MB VRAM)
+    obs_t = torch.from_numpy(obs)
+    actions_t = torch.from_numpy(actions)
     
     print(f"Data: {obs.shape[0]} trajectories, {obs.shape[1]-1} steps each")
     print(f"Obs shape: {obs.shape}, Actions shape: {actions.shape}\n")
@@ -293,10 +294,10 @@ def train(
     
     for step in pbar:
         idx = torch.randint(0, obs_t.shape[0], (batch_size,))
-        obs_batch = obs_t[idx]
-        action_batch = actions_t[idx]
-        
-        losses = model.compute_loss(obs_batch, action_batch, unroll_steps=5)
+        obs_batch = obs_t[idx].to(device)
+        action_batch = actions_t[idx].to(device)
+
+        losses = model.compute_loss(obs_batch, action_batch, unroll_steps=3)
         
         optimizer.zero_grad()
         losses['total_loss'].backward()

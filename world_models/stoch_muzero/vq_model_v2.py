@@ -544,9 +544,11 @@ class VQWorldModelV2(nn.Module):
         
         total_vq_loss = enc_result['vq_loss']
         
-        # Reconstruction loss
-        recon = self.decode(enc_result['z_q'])
-        recon_loss = F.mse_loss(recon, obs_flat)
+        # Reconstruction loss (only t=0 observations, saves ~2-3 GB VRAM)
+        z_q_t0 = enc_result['z_q'][:B]  # First obs of each trajectory
+        obs_t0 = obs_flat[:B]
+        recon = self.decode(z_q_t0)
+        recon_loss = F.mse_loss(recon, obs_t0)
         total_recon_loss = recon_loss
         
         # Transition loss
