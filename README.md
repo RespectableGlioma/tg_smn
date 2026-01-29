@@ -11,6 +11,43 @@ The intended workflow is:
    - run hyperparameter / expert-count / seed sweeps
    - load and visualize results
 
+## TODO
+E. Concrete Next Steps (Prioritized)
+
+Verify on Othello (immediate)
+
+Run v2 with dead code reset
+Should see near-zero entropy everywhere (fully deterministic)
+Codebook should capture board configurations
+
+
+Rule extraction visualization (1-2 days)
+
+Decode what each code represents visually
+Build transition graph: nodes=codes, edges=actions, color=entropy
+Compare discovered rules to actual 2048 rules
+
+
+Planning benchmark (few days)
+
+Implement VQ-MCTS that only branches on high-entropy transitions
+Compare tree size vs standard MCTS for same planning horizon
+Metric: nodes expanded per decision
+
+
+Transfer experiment (important for the thesis)
+
+Train on 2048 variant A (one visual style)
+Fine-tune encoder only on variant B (different style, same rules)
+Measure: Does dynamics transfer? It should!
+
+
+Connect to TG-SMN (your main project)
+
+The factorization is exactly what TG-SMN needs
+"Rules" = stable structure, low entropy, compress well
+"Randomness" = environmental noise, high entropy, don't memorize
+
 ## Quickstart (Colab)
 
 1. Upload / clone this repo.
@@ -74,5 +111,3 @@ These do **not** include time-to-completion estimates by default; they report co
 If you run large multi-domain sweeps in Colab, move Hugging Face caches to Google Drive to avoid filling `/tmp` and the local disk.
 The root `TG_SMN_Run.ipynb` notebook includes a cell that mounts Drive and sets `HF_HOME`, `HF_DATASETS_CACHE`, and related variables before importing datasets.
 
-## TODO
-I guess part of the challenge still though is that we'd like to bind the codes in the codebook to specific objects within an image to look for change over them... in nature this, itself, is often driven by dynamics... pixels that are largely invariant over frames (flow together) are "objects" for example since they exhibit some degree of togetherness. It would be great to somehow leverage a prior like this into the codebook learning? This perceptual problem could also probably be an entirely separate project.
