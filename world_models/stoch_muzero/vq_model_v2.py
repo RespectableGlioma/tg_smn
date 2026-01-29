@@ -528,18 +528,20 @@ class VQWorldModelV2(nn.Module):
         B, Tp1, C, H, W = obs_batch.shape
         T = Tp1 - 1
         unroll = min(unroll_steps, T)
-        
+
         total_recon_loss = 0.0
         total_vq_loss = 0.0
         total_transition_loss = 0.0
         total_entropy = 0.0
-        
-        # Encode all observations
-        obs_flat = obs_batch.reshape(B * Tp1, C, H, W)
+
+        # Only encode timesteps we need: t=0 to t=unroll (saves ~10x VRAM)
+        n_timesteps = unroll + 1
+        obs_needed = obs_batch[:, :n_timesteps]  # [B, unroll+1, C, H, W]
+        obs_flat = obs_needed.reshape(B * n_timesteps, C, H, W)
         enc_result = self.encode(obs_flat, training=True)
-        
-        all_z_q = enc_result['z_q'].reshape(B, Tp1, -1, self.cfg.code_dim)
-        all_indices = enc_result['indices'].reshape(B, Tp1, -1)
+
+        all_z_q = enc_result['z_q'].reshape(B, n_timesteps, -1, self.cfg.code_dim)
+        all_indices = enc_result['indices'].reshape(B, n_timesteps, -1)
         z_continuous = enc_result['z_continuous']  # For dead code reset
         
         total_vq_loss = enc_result['vq_loss']
