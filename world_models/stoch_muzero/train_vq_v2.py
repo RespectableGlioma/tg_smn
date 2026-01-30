@@ -292,20 +292,25 @@ def train(
     total_resets = 0
     best_usage = 0.0
     
+    unroll_steps = 3
+
     for step in pbar:
         idx = torch.randint(0, obs_t.shape[0], (batch_size,))
-        obs_batch = obs_t[idx].to(device)
-        action_batch = actions_t[idx].to(device)
+        # Only load needed timesteps to GPU (unroll + 1), not all 51
+        n_timesteps_needed = unroll_steps + 1
+        obs_batch = obs_t[idx, :n_timesteps_needed].to(device)
+        action_batch = actions_t[idx, :unroll_steps].to(device)
 
-        losses = model.compute_loss(obs_batch, action_batch, unroll_steps=3)
-        
+        losses = model.compute_loss(obs_batch, action_batch, unroll_steps=unroll_steps)
+
         optimizer.zero_grad()
         losses['total_loss'].backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
-        
-        total_resets += losses['codes_reset']
-        best_usage = max(best_usage, losses['codebook_usage'])
+
+        # Convert to Python floats to avoid accumulating GPU tensors
+        total_resets += float(losses['codes_reset'])
+        best_usage = max(best_usage, float(losses['codebook_usage']))
         
         if step % 100 == 0:
             pbar.set_postfix({
@@ -321,6 +326,8 @@ def train(
             print(f"\n[Step {step}] Codebook: {stats['active_codes']}/{codebook_size} "
                   f"({100*stats['active_codes']/codebook_size:.1f}%), "
                   f"Total resets: {total_resets}")
+            # Periodic memory cleanup to avoid fragmentation
+            torch.cuda.empty_cache()
     
     # Final analysis
     print(f"\n{'='*60}")
