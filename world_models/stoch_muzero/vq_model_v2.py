@@ -127,30 +127,32 @@ class VectorQuantizerV2(nn.Module):
         
         # Compute losses
         if training:
-            # One-hot encoding
-            encodings = F.one_hot(indices.reshape(-1), self.n_codes).float()
-            
-            # EMA update cluster sizes
-            cluster_size = encodings.sum(0)
-            self.ema_cluster_size.mul_(self.ema_decay).add_(
-                cluster_size, alpha=1 - self.ema_decay
-            )
-            
-            # Laplace smoothing
-            n = self.ema_cluster_size.sum()
-            self.ema_cluster_size.add_(1e-5).div_(
-                n + self.n_codes * 1e-5
-            ).mul_(n)
-            
-            # EMA update embeddings
-            dw = encodings.t() @ z_flat
-            self.ema_w.mul_(self.ema_decay).add_(dw, alpha=1 - self.ema_decay)
-            
-            self.embedding.weight.data.copy_(
-                self.ema_w / self.ema_cluster_size.unsqueeze(1).clamp(min=1e-5)
-            )
-            
-            # Losses
+            # EMA updates (no gradients needed - prevents memory leak)
+            with torch.no_grad():
+                # One-hot encoding
+                encodings = F.one_hot(indices.reshape(-1), self.n_codes).float()
+
+                # EMA update cluster sizes
+                cluster_size = encodings.sum(0)
+                self.ema_cluster_size.mul_(self.ema_decay).add_(
+                    cluster_size, alpha=1 - self.ema_decay
+                )
+
+                # Laplace smoothing
+                n = self.ema_cluster_size.sum()
+                self.ema_cluster_size.add_(1e-5).div_(
+                    n + self.n_codes * 1e-5
+                ).mul_(n)
+
+                # EMA update embeddings
+                dw = encodings.t() @ z_flat.detach()
+                self.ema_w.mul_(self.ema_decay).add_(dw, alpha=1 - self.ema_decay)
+
+                self.embedding.weight.data.copy_(
+                    self.ema_w / self.ema_cluster_size.unsqueeze(1).clamp(min=1e-5)
+                )
+
+            # VQ Losses (need gradients for training)
             commitment_loss = F.mse_loss(z, z_q.detach())
             codebook_loss = F.mse_loss(z_q, z.detach())
             vq_loss = commitment_loss * self.commitment_cost + codebook_loss
