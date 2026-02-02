@@ -1,0 +1,30 @@
+# 2048-specific configuration
+# Inherits from default.yaml conceptually
+
+game: "2048"
+action_space_size: 4  # up, down, left, right
+chance_space_size: 33  # 16 positions * 2 values (2 or 4) + 1 (no spawn)
+
+# 2048 uses binary state representation
+# 31 bits per tile (can represent values up to 2^31)
+# 16 tiles total = 496 features
+observation_dim: 496
+
+# Longer rollouts help in 2048
+num_unroll_steps: 5
+td_steps: 10
+
+# 2048 has very long episodes
+max_moves: 10000
+
+# Discount slightly lower since rewards are immediate
+discount: 0.99
+
+# MCTS settings for 2048
+num_simulations: 50
+root_dirichlet_alpha: 0.3
+
+# Macro discovery - 2048 has deterministic slide/merge
+entropy_threshold: 0.1
+min_macro_length: 2
+max_macro_length: 4  # Shorter macros for 2048

@@ -1,5 +1,7 @@
 I want to buld this: Stochastic MuZero with learned temporal abstractions - discovering rules as compressible causal structure rather than explicit symbols. Here is some of our prior conversation for guidance.
 
+Here is a good draft repo of Stochastic MuZero: https://github.com/DHDev0/Stochastic-muzero
+
 What you’re proposing (cleanly stated)
 You’re saying:
 
@@ -468,3 +470,5 @@ This is clean, principled, and empirically testable.
 Want me to sketch the exact code modifications for your current harness?
 
 I want to start this over, building off of the Stochastic MuZero repository but trying to capture our ideas around llearning, memorizing, and re-using RULES. We should also follow MuZero conventions for games regarding when to use pixel inputs and when to start with other abstractions. For example, for 2048: They use a binary/state representation - "a binary representation of 31 bits for each number was obtained, for a total size of 496 numbers" (not pixels). Likewise, Othello should start from state, not pixels... but Atari games should be pixel inputs.
+
+We should build this to be tested on the same environments as Stochastic MuZero too

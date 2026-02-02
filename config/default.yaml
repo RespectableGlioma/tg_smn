@@ -1,0 +1,65 @@
+# Stochastic MuZero with Learned Temporal Abstractions
+# Default Configuration
+
+# Game settings
+game: "2048"
+action_space_size: 4
+chance_space_size: 33  # 2048: 16 positions * 2 values + 1 (no spawn)
+
+# Network architecture
+state_dim: 256
+hidden_dim: 128
+num_layers: 2
+observation_dim: 496  # 2048: 31 bits * 16 tiles
+
+# Support for scalar predictions (categorical representation)
+support_size: 31
+
+# Training
+batch_size: 256
+learning_rate: 0.001
+weight_decay: 0.0001
+max_grad_norm: 5.0
+num_unroll_steps: 5
+td_steps: 10
+discount: 0.997
+
+# Self-play
+num_simulations: 50
+num_actors: 4
+max_moves: 10000
+temperature_init: 1.0
+temperature_final: 0.1
+temperature_decay_steps: 10000
+
+# Replay buffer
+replay_buffer_size: 100000
+priority_alpha: 1.0
+priority_beta: 1.0
+
+# MCTS UCB parameters
+pb_c_base: 19652.0
+pb_c_init: 1.25
+root_dirichlet_alpha: 0.3
+root_exploration_fraction: 0.25
+
+# Macro-operator discovery (key innovation)
+entropy_threshold: 0.1       # Below this, transition is "deterministic"
+composition_threshold: 0.01  # Max MSE for macro validity
+min_macro_length: 2
+max_macro_length: 8
+macro_confidence_decay: 0.9
+macro_confidence_boost: 1.05
+max_macros: 1000
+
+# Chance node handling in MCTS
+chance_entropy_threshold: 0.5  # Below: enumerate top-k, above: sample
+top_k_chances: 5
+
+# Logging and checkpoints
+log_interval: 100
+save_interval: 1000
+eval_interval: 500
+
+# Device
+device: "cuda"
