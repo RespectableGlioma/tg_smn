@@ -36,6 +36,9 @@ class MCTSConfig:
     use_macros: bool = True
     macro_verification_threshold: float = 0.1
 
+    # Action space size (needed for policy output)
+    action_space_size: int = 4
+
 
 class StochasticMCTS:
     """
@@ -351,8 +354,8 @@ class StochasticMCTS:
         """
         actions, probs = root.get_policy()
 
-        # Create full policy array
-        policy = np.zeros(len(root.children))
+        # Create full policy array sized by action space, not number of children
+        policy = np.zeros(self.config.action_space_size)
         for action, prob in zip(actions, probs):
             policy[action] = prob
 
