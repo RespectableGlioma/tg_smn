@@ -41,6 +41,10 @@ class GameHistory:
     entropies: List[float] = field(default_factory=list)
     latent_states: List[torch.Tensor] = field(default_factory=list)
 
+    # Two-player game support
+    to_play: List[int] = field(default_factory=list)  # Player at each step (0 or 1)
+    is_two_player: bool = False
+
     # Priority sampling
     priorities: Optional[np.ndarray] = None
     game_priority: float = 1.0
@@ -61,6 +65,7 @@ class GameHistory:
         entropy: float = 0.0,
         latent_state: Optional[torch.Tensor] = None,
         afterstate: Optional[torch.Tensor] = None,
+        player: int = 0,
     ) -> None:
         """Append a transition to the history."""
         self.observations.append(observation)
@@ -70,6 +75,7 @@ class GameHistory:
         self.root_values.append(root_value)
         self.chance_outcomes.append(chance_outcome)
         self.entropies.append(entropy)
+        self.to_play.append(player)
 
         if latent_state is not None:
             self.latent_states.append(latent_state)
@@ -87,7 +93,9 @@ class GameHistory:
         """
         Compute n-step return targets.
 
-        target_t = r_t + γr_{t+1} + ... + γ^{n-1}r_{t+n-1} + γ^n v_{t+n}
+        For single-player: target_t = r_t + γr_{t+1} + ... + γ^n v_{t+n}
+        For two-player: rewards and bootstrap values are negated when the
+        player changes, since values are from the current player's perspective.
 
         Args:
             discount: Discount factor γ
@@ -103,14 +111,25 @@ class GameHistory:
             value = 0.0
             for j in range(td_steps):
                 if i + j < n:
-                    value += (discount ** j) * self.rewards[i + j]
+                    # For two-player games, negate reward when player differs
+                    if self.is_two_player and self.to_play:
+                        same_player = self.to_play[i + j] == self.to_play[i]
+                        sign = 1.0 if same_player else -1.0
+                    else:
+                        sign = 1.0
+                    value += (discount ** j) * sign * self.rewards[i + j]
                 else:
                     break
 
             # Bootstrap from value estimate
             bootstrap_idx = i + td_steps
             if bootstrap_idx < n:
-                value += (discount ** td_steps) * self.root_values[bootstrap_idx]
+                if self.is_two_player and self.to_play:
+                    same_player = self.to_play[bootstrap_idx] == self.to_play[i]
+                    sign = 1.0 if same_player else -1.0
+                else:
+                    sign = 1.0
+                value += (discount ** td_steps) * sign * self.root_values[bootstrap_idx]
 
             targets.append(value)
 

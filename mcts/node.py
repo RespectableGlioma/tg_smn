@@ -52,6 +52,9 @@ class Node:
     # Chance-specific (for chance nodes)
     chance_entropy: float = 0.0
 
+    # Two-player support (-1 = chance node / unknown, 0/1 = player)
+    to_play: int = -1
+
     @property
     def expanded(self) -> bool:
         """Check if node has been expanded."""

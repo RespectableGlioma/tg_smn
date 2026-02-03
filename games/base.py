@@ -218,6 +218,15 @@ class Game(ABC):
             info=info,
         )
 
+    @property
+    def is_two_player(self) -> bool:
+        """Whether this is a two-player alternating game (requires value negation)."""
+        return False
+
+    def current_player(self, state: State) -> int:
+        """Return current player (0 or 1). Override for two-player games."""
+        return 0
+
     def get_canonical_state(self, state: State) -> State:
         """
         Get canonical form of state (for symmetry handling).

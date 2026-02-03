@@ -82,12 +82,14 @@ def self_play_game(
         root_dirichlet_alpha=config.root_dirichlet_alpha,
         root_exploration_fraction=config.root_exploration_fraction,
         use_macros=macro_cache is not None,
+        action_space_size=game.action_space_size,
+        is_two_player=game.is_two_player,
     )
     mcts = StochasticMCTS(model, mcts_config, macro_cache)
 
     # Initialize game
     state = game.reset()
-    history = GameHistory()
+    history = GameHistory(is_two_player=game.is_two_player)
 
     # Statistics
     macro_uses = 0
@@ -130,6 +132,7 @@ def self_play_game(
             entropy = dynamics_out.chance_entropy.item()
 
         # Record transition
+        player = game.current_player(state) if game.is_two_player else 0
         history.append(
             observation=observation.cpu(),
             action=action,
@@ -140,6 +143,7 @@ def self_play_game(
             entropy=entropy,
             latent_state=root.hidden_state.cpu() if root.hidden_state is not None else None,
             afterstate=dynamics_out.afterstate.cpu() if dynamics_out.afterstate is not None else None,
+            player=player,
         )
 
         total_entropy += entropy

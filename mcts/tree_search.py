@@ -39,6 +39,9 @@ class MCTSConfig:
     # Action space size (needed for policy output)
     action_space_size: int = 4
 
+    # Two-player support
+    is_two_player: bool = False
+
 
 class StochasticMCTS:
     """
@@ -87,12 +90,12 @@ class StochasticMCTS:
         initial = self.model.initial_inference(observation)
 
         # Create root node
-        root = Node()
+        root = Node(to_play=0)
         root.expand(
             hidden_state=initial.state,
             policy_logits=initial.policy_logits.squeeze(0),
             legal_actions=legal_actions,
-            is_chance_node=False,  # Root is decision node
+            is_chance_node=True,  # Children are chance nodes (afterstates)
         )
 
         # Add exploration noise
@@ -267,6 +270,12 @@ class StochasticMCTS:
                 entropy_threshold=self.config.entropy_threshold,
             )
 
+            # For two-player games, set to_play on decision node children
+            if self.config.is_two_player and parent is not None:
+                parent_to_play = parent.to_play if parent.to_play >= 0 else 0
+                for child in node.children.values():
+                    child.to_play = 1 - parent_to_play
+
             # Get afterstate value
             _, value_logits = self.model.predict_afterstate(dynamics_out.afterstate)
             value_probs = F.softmax(value_logits, dim=-1)
@@ -310,9 +319,13 @@ class StochasticMCTS:
         """
         Backpropagate value through the search path.
 
+        For single-player: straightforward value backup.
+        For two-player: negate value at decision node boundaries (zero-sum).
+        Values at each node are stored from that node's player's perspective.
+
         Args:
             search_path: Path from root to leaf
-            value: Value at leaf node
+            value: Value at leaf node (from leaf player's perspective)
         """
         for node in reversed(search_path):
             node.visit_count += 1
@@ -321,8 +334,15 @@ class StochasticMCTS:
             # Update min-max stats
             self.min_max_stats.update(node.reward + self.config.discount * value)
 
-            # Discount value for next level up
-            value = node.reward + self.config.discount * value
+            # Compute backed-up value from this node's perspective
+            backed_value = node.reward + self.config.discount * value
+
+            # For two-player zero-sum games, negate at decision nodes
+            # since the parent decision node belongs to the opponent
+            if self.config.is_two_player and not node.is_chance_node:
+                value = -backed_value
+            else:
+                value = backed_value
 
     def _support_to_scalar(self, probs: torch.Tensor) -> torch.Tensor:
         """Convert categorical support to scalar value."""
