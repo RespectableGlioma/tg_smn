@@ -360,6 +360,11 @@ class MacroCache:
         worst_id = min(self.macros.keys(), key=lambda m: self.macros[m].confidence)
         self._remove_macro(worst_id)
 
+    def get_top_macros(self, n: int = 5) -> List[MacroOperator]:
+        """Get top-n macros by confidence."""
+        sorted_macros = sorted(self.macros.values(), key=lambda m: m.confidence, reverse=True)
+        return sorted_macros[:n]
+
     def get_statistics(self) -> Dict[str, float]:
         """Get cache statistics."""
         return {
