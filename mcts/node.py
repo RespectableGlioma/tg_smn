@@ -280,7 +280,11 @@ class Node:
             Selected action index
         """
         actions = list(self.children.keys())
-        visit_counts = np.array([self.children[a].visit_count for a in actions])
+        visit_counts = np.array([self.children[a].visit_count for a in actions], dtype=np.float64)
+
+        if visit_counts.sum() == 0:
+            # No visits — uniform random over children
+            return int(np.random.choice(actions))
 
         if temperature == 0:
             # Greedy selection
@@ -288,7 +292,10 @@ class Node:
 
         # Temperature-based selection
         counts_temp = visit_counts ** (1.0 / temperature)
-        probs = counts_temp / counts_temp.sum()
+        total = counts_temp.sum()
+        if total == 0:
+            return int(np.random.choice(actions))
+        probs = counts_temp / total
         return int(np.random.choice(actions, p=probs))
 
     def get_policy(self) -> Tuple[np.ndarray, np.ndarray]:
@@ -299,8 +306,13 @@ class Node:
             (actions, probabilities)
         """
         actions = np.array(list(self.children.keys()))
-        visit_counts = np.array([self.children[a].visit_count for a in actions])
-        probs = visit_counts / visit_counts.sum()
+        visit_counts = np.array([self.children[a].visit_count for a in actions], dtype=np.float64)
+        total = visit_counts.sum()
+        if total == 0:
+            # No visits — uniform distribution
+            probs = np.ones(len(actions)) / len(actions)
+        else:
+            probs = visit_counts / total
         return actions, probs
 
 
