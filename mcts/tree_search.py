@@ -288,6 +288,8 @@ class StochasticMCTS:
 
             # Get chance outcome that led here
             chance = node.action_from_parent
+            if chance is None:
+                chance = 0  # Fallback for deterministic games
             chance_tensor = torch.tensor([chance], device=parent_state.device)
 
             # Parent is afterstate, compute next state
