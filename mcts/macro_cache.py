@@ -185,8 +185,8 @@ class MacroCache:
         if action_tuple in self.action_index:
             # Update existing macros with new evidence
             for macro_id in self.action_index[action_tuple]:
-                macro = self.macros[macro_id]
-                macro.entropy_history.append(max_entropy)
+                if macro_id in self.macros:  # Check macro still exists (may have been pruned)
+                    self.macros[macro_id].entropy_history.append(max_entropy)
             return None
 
         # Optional: composition check
