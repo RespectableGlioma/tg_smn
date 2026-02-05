@@ -115,10 +115,11 @@ class MacroCache:
         composition_threshold: float = 0.01,
         min_macro_length: int = 2,
         max_macro_length: int = 8,
-        max_macros: int = 1000,
+        max_macros: int = 100,  # Reduced from 1000
         confidence_decay: float = 0.9,
         confidence_boost: float = 1.05,
         min_confidence: float = 0.5,
+        min_occurrences: int = 3,  # Require seeing pattern multiple times before creating macro
     ):
         self.state_dim = state_dim
         self.entropy_threshold = entropy_threshold
@@ -129,11 +130,15 @@ class MacroCache:
         self.confidence_decay = confidence_decay
         self.confidence_boost = confidence_boost
         self.min_confidence = min_confidence
+        self.min_occurrences = min_occurrences
 
         # Storage
         self.macros: Dict[int, MacroOperator] = {}
         self.action_index: Dict[Tuple[int, ...], List[int]] = defaultdict(list)
         self.spatial_index = SpatialHash(feature_dim=state_dim)
+
+        # Candidate tracking - patterns seen but not yet promoted to macros
+        self.candidates: Dict[Tuple[int, ...], int] = defaultdict(int)  # action_tuple -> occurrence count
 
         # Statistics
         self.total_discoveries = 0
@@ -180,7 +185,7 @@ class MacroCache:
         if max_entropy > self.entropy_threshold:
             return None
 
-        # Check if this action sequence already exists
+        # Check if this action sequence already exists as a macro
         action_tuple = tuple(actions)
         if action_tuple in self.action_index:
             # Update existing macros with new evidence
@@ -188,6 +193,11 @@ class MacroCache:
                 if macro_id in self.macros:  # Check macro still exists (may have been pruned)
                     self.macros[macro_id].entropy_history.append(max_entropy)
             return None
+
+        # Track as candidate - only promote to macro after seeing it min_occurrences times
+        self.candidates[action_tuple] += 1
+        if self.candidates[action_tuple] < self.min_occurrences:
+            return None  # Not seen enough times yet
 
         # Optional: composition check
         if model is not None:
@@ -197,7 +207,7 @@ class MacroCache:
             if composition_error > self.composition_threshold:
                 return None
 
-        # Create new macro
+        # Create new macro (pattern has been seen enough times)
         macro = MacroOperator(
             id=self._next_id,
             action_sequence=action_tuple,
@@ -369,6 +379,7 @@ class MacroCache:
         """Get cache statistics."""
         return {
             "num_macros": len(self.macros),
+            "num_candidates": len(self.candidates),
             "total_discoveries": self.total_discoveries,
             "total_uses": self.total_uses,
             "total_successes": self.total_successes,
