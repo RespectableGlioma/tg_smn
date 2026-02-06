@@ -102,7 +102,7 @@ class MacroCache:
     Cache for discovered macro-operators.
 
     Handles:
-    - Macro discovery from trajectories
+    - Macro discovery from trajectories (state-conditioned)
     - Macro lookup for planning
     - Macro statistics and confidence tracking
     - Pruning unreliable macros
@@ -120,6 +120,7 @@ class MacroCache:
         confidence_boost: float = 1.05,
         min_confidence: float = 0.5,
         min_occurrences: int = 3,  # Require seeing pattern multiple times before creating macro
+        state_similarity_buckets: int = 64,  # Number of buckets for state hashing
     ):
         self.state_dim = state_dim
         self.entropy_threshold = entropy_threshold
@@ -131,14 +132,20 @@ class MacroCache:
         self.confidence_boost = confidence_boost
         self.min_confidence = min_confidence
         self.min_occurrences = min_occurrences
+        self.state_similarity_buckets = state_similarity_buckets
 
         # Storage
         self.macros: Dict[int, MacroOperator] = {}
         self.action_index: Dict[Tuple[int, ...], List[int]] = defaultdict(list)
         self.spatial_index = SpatialHash(feature_dim=state_dim)
 
-        # Candidate tracking - patterns seen but not yet promoted to macros
-        self.candidates: Dict[Tuple[int, ...], int] = defaultdict(int)  # action_tuple -> occurrence count
+        # State-conditioned candidate tracking
+        # Key: (state_bucket, action_tuple) -> occurrence count
+        # This ensures we only count patterns from similar board states
+        self.candidates: Dict[Tuple[int, Tuple[int, ...]], int] = defaultdict(int)
+
+        # Track unique action patterns seen (for statistics)
+        self.unique_patterns: set = set()
 
         # Statistics
         self.total_discoveries = 0
@@ -147,6 +154,32 @@ class MacroCache:
 
         # Next macro ID
         self._next_id = 0
+
+        # Random projection for state hashing
+        self._state_projection = None
+
+    def _get_state_bucket(self, state: torch.Tensor) -> int:
+        """Hash state to a bucket for state-conditioned macro tracking."""
+        with torch.no_grad():
+            # Lazy initialization of projection matrix
+            if self._state_projection is None:
+                self._state_projection = torch.randn(
+                    state.shape[-1], self.state_similarity_buckets,
+                    device=state.device
+                )
+
+            # Ensure state is 1D
+            if state.dim() > 1:
+                state = state.squeeze(0)
+
+            # Move projection to same device if needed
+            if self._state_projection.device != state.device:
+                self._state_projection = self._state_projection.to(state.device)
+
+            # Project and hash
+            proj = state @ self._state_projection
+            bucket = int(proj.argmax().item())
+        return bucket
 
     def discover_macro(
         self,
@@ -194,10 +227,17 @@ class MacroCache:
                     self.macros[macro_id].entropy_history.append(max_entropy)
             return None
 
-        # Track as candidate - only promote to macro after seeing it min_occurrences times
-        self.candidates[action_tuple] += 1
-        if self.candidates[action_tuple] < self.min_occurrences:
-            return None  # Not seen enough times yet
+        # Track unique patterns for statistics
+        self.unique_patterns.add(action_tuple)
+
+        # State-conditioned candidate tracking
+        # Only count as same pattern when from similar board states
+        state_bucket = self._get_state_bucket(states[0])
+        candidate_key = (state_bucket, action_tuple)
+
+        self.candidates[candidate_key] += 1
+        if self.candidates[candidate_key] < self.min_occurrences:
+            return None  # Not seen enough times from similar states yet
 
         # Optional: composition check
         if model is not None:
@@ -380,6 +420,7 @@ class MacroCache:
         return {
             "num_macros": len(self.macros),
             "num_candidates": len(self.candidates),
+            "unique_patterns": len(self.unique_patterns),
             "total_discoveries": self.total_discoveries,
             "total_uses": self.total_uses,
             "total_successes": self.total_successes,
@@ -398,6 +439,41 @@ class MacroCache:
             ),
         }
 
+    def get_macro_details(self, action_decoder: Optional[Callable] = None) -> List[Dict]:
+        """
+        Get detailed info about top macros.
+
+        Args:
+            action_decoder: Optional function to decode action indices to readable format
+                           e.g., for chess: action_to_algebraic
+
+        Returns:
+            List of macro detail dictionaries
+        """
+        details = []
+        for macro in self.get_top_macros(n=10):
+            actions = macro.action_sequence
+
+            # Decode actions if decoder provided
+            if action_decoder is not None:
+                try:
+                    decoded = [action_decoder(a) for a in actions]
+                except Exception:
+                    decoded = list(actions)
+            else:
+                decoded = list(actions)
+
+            details.append({
+                "id": macro.id,
+                "actions": list(actions),
+                "decoded": decoded,
+                "length": macro.length,
+                "confidence": macro.confidence,
+                "usage_count": macro.usage_count,
+                "success_rate": macro.success_rate,
+            })
+        return details
+
 
 def discover_macros_from_trajectory(
     trajectory: List[Dict],
@@ -406,6 +482,7 @@ def discover_macros_from_trajectory(
     max_length: int = 8,
     training_step: int = 0,
     model: Optional[torch.nn.Module] = None,
+    require_diverse_actions: bool = True,
 ) -> List[MacroOperator]:
     """
     Discover all potential macros from a trajectory.
@@ -423,6 +500,7 @@ def discover_macros_from_trajectory(
         max_length: Maximum macro length
         training_step: Current training step
         model: Optional model for composition checking
+        require_diverse_actions: If True, reject macros where all actions are identical
 
     Returns:
         List of newly discovered macros
@@ -448,6 +526,13 @@ def discover_macros_from_trajectory(
 
             actions = [t["action"] for t in segment]
             entropies = [t["entropy"] for t in segment]
+
+            # Validation: reject macros with all identical actions (e.g., (730, 730))
+            # These are meaningless patterns that arise from untrained models
+            if require_diverse_actions:
+                unique_actions = set(actions)
+                if len(unique_actions) == 1:
+                    continue  # Skip patterns like (X, X, X)
 
             # Try to create macro
             macro = macro_cache.discover_macro(

@@ -355,3 +355,70 @@ class GameChess(Game):
         elif state.is_check():
             status = "\nCheck!"
         return f"{state}\nTurn: {turn_str} | Move: {state.fullmove_number}{status}"
+
+    def action_to_algebraic(self, action: int, from_white_perspective: bool = True) -> str:
+        """
+        Convert action index to human-readable algebraic notation.
+
+        Args:
+            action: Action index (0-4671)
+            from_white_perspective: If True, decode as if white is moving
+
+        Returns:
+            String like "e2e4", "Ng1f3", "e7e8=Q", or "???" if invalid
+        """
+        from_sq = action // 73
+        move_type = action % 73
+
+        from_file = chess.square_file(from_sq)
+        from_rank = chess.square_rank(from_sq)
+
+        promotion = None
+        promotion_str = ""
+
+        if move_type < 56:
+            # Queen-like move
+            direction = move_type // 7
+            distance = move_type % 7 + 1
+            df, dr = QUEEN_DIRECTIONS[direction]
+            to_file = from_file + df * distance
+            to_rank = from_rank + dr * distance
+
+        elif move_type < 64:
+            # Knight move
+            knight_idx = move_type - 56
+            df, dr = KNIGHT_MOVES[knight_idx]
+            to_file = from_file + df
+            to_rank = from_rank + dr
+
+        else:
+            # Underpromotion
+            under_idx = move_type - 64
+            dir_idx = under_idx // 3
+            piece_idx = under_idx % 3
+            df, dr = UNDERPROMO_DIRECTIONS[dir_idx]
+            to_file = from_file + df
+            to_rank = from_rank + dr
+            promotion = UNDERPROMO_PIECES[piece_idx]
+            promotion_str = "=" + chess.piece_symbol(promotion).upper()
+
+        # Bounds check
+        if not (0 <= to_file <= 7 and 0 <= to_rank <= 7):
+            return "???"
+
+        # Queen promotion detection
+        if promotion is None and to_rank == 7:
+            promotion_str = "=Q"
+
+        # Build square names
+        from_name = chess.FILE_NAMES[from_file] + chess.RANK_NAMES[from_rank]
+        to_name = chess.FILE_NAMES[to_file] + chess.RANK_NAMES[to_rank]
+
+        return f"{from_name}{to_name}{promotion_str}"
+
+
+# Module-level helper for macro decoding
+def chess_action_decoder(action: int) -> str:
+    """Decode a chess action index to algebraic notation (module-level helper)."""
+    game = GameChess()
+    return game.action_to_algebraic(action)
