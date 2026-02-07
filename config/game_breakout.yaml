@@ -1,0 +1,45 @@
+# Breakout configuration
+# Deterministic Atari for macro discovery
+
+game: "atari"
+game_name: "Breakout"  # Specific Atari game
+
+# Breakout has 4 actions: NOOP, FIRE, LEFT, RIGHT
+action_space_size: 4
+chance_space_size: 1  # Deterministic (no sticky actions)
+
+# 84x84 grayscale, 4 stacked frames, flattened for MLP
+observation_dim: 28224  # 84 * 84 * 4
+
+# Atari-specific settings
+frame_stack: 4
+frame_skip: 4
+deterministic: true
+grayscale: true
+flatten: true
+
+# Training settings
+num_unroll_steps: 5
+td_steps: 10
+max_moves: 27000  # ~30 min at 15 fps
+
+# Discount for Atari
+discount: 0.997
+
+# MCTS settings
+num_simulations: 50
+root_dirichlet_alpha: 0.25
+
+# Macro discovery
+# Breakout physics are fully deterministic:
+# - Ball trajectory
+# - Paddle movement
+# - Brick breaking
+entropy_threshold: 0.1
+min_macro_length: 2
+max_macro_length: 8
+
+# Network settings for larger observation space
+state_dim: 256
+hidden_dim: 256
+num_layers: 3

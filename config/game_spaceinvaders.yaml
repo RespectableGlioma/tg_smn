@@ -1,0 +1,45 @@
+# Space Invaders configuration
+# Deterministic Atari for macro discovery
+
+game: "atari"
+game_name: "SpaceInvaders"
+
+# Space Invaders has 6 actions: NOOP, FIRE, RIGHT, LEFT, RIGHTFIRE, LEFTFIRE
+action_space_size: 6
+chance_space_size: 1  # Deterministic
+
+# 84x84 grayscale, 4 stacked frames, flattened
+observation_dim: 28224
+
+# Atari settings
+frame_stack: 4
+frame_skip: 4
+deterministic: true
+grayscale: true
+flatten: true
+
+# Training
+num_unroll_steps: 5
+td_steps: 10
+max_moves: 27000
+
+discount: 0.997
+
+# MCTS
+num_simulations: 50
+root_dirichlet_alpha: 0.25
+
+# Macro discovery
+# Space Invaders has predictable patterns:
+# - Enemy wave movement
+# - Shooting sequences
+# - Dodging patterns
+# - Shield usage
+entropy_threshold: 0.1
+min_macro_length: 2
+max_macro_length: 8
+
+# Network (might need larger for complex visuals)
+state_dim: 256
+hidden_dim: 256
+num_layers: 3

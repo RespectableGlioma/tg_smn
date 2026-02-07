@@ -4,3 +4,6 @@ pyyaml>=6.0
 tqdm>=4.65.0
 tensorboard>=2.13.0
 gymnasium>=0.28.0
+gymnasium[atari]>=0.28.0
+ale-py>=0.8.0
+python-chess>=1.999
